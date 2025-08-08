@@ -1,0 +1,47 @@
+{
+	"Name": "Gaming Mouse Battery",
+	"Version": "0.1.0.0",
+	"Author": "Florian Weißmeier-Dörste",
+	"Actions": [
+		{
+			"Name": "Attack Shark",
+			"UUID": "tech.flowei.gaming-mouse-battery.attack-shark",
+			"Icon": "imgs/actions/icon",
+			"Tooltip": "Displays the current battery percentage of your web-enabled Attack Shark mouse.",
+			"PropertyInspectorPath": "ui/mouse-battery.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/loading",
+					"TitleAlignment": "middle"
+				}
+			]
+		}
+	],
+	"Category": "Gaming Mouse Battery",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "Display the current battery percentage of supported gaming mice",
+	"Icon": "imgs/plugin/marketplace",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.5"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "12"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "20",
+		"Debug": "enabled"
+	},
+	"UUID": "tech.flowei.gaming-mouse-battery"
+}
