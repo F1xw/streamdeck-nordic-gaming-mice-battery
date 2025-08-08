@@ -8,6 +8,7 @@ import {
 } from "@elgato/streamdeck";
 import { createRequire } from "node:module";
 import { icons, iconUnknown } from "../assets/battery-svg";
+import attackSharkModels from "../config/attack-shark-mice.json";
 
 // Dynamically require native module at runtime to avoid bundling issues
 const requireNative = createRequire(import.meta.url);
@@ -15,8 +16,7 @@ const requireNative = createRequire(import.meta.url);
 let HID: any;
 
 type Settings = {
-    renderTitle: boolean;
-    renderIcon: boolean;
+    iconMode?: boolean; // true = icon, false = text
     iconColor: string;
 };
 
@@ -25,6 +25,11 @@ export class AttackSharkBatteryAction extends SingletonAction<Settings> {
     private refreshTimer: NodeJS.Timeout | null = null;
 
     override async onWillAppear(ev: WillAppearEvent<Settings>): Promise<void> {
+        await ev.action.setImage(
+            `data:image/svg+xml,${encodeURIComponent(
+                iconUnknown.replace("{{COLOR}}", ev.payload.settings.iconColor)
+            )}`
+        );
         await this.updateState(ev);
         this.refreshTimer = setInterval(() => {
             void this.updateState(ev);
@@ -51,14 +56,17 @@ export class AttackSharkBatteryAction extends SingletonAction<Settings> {
     private async updateState(ev: WillAppearEvent<Settings>): Promise<void> {
         try {
             const { isCharging, percentage } = readBatteryState() ?? {};
+            const showIcon = ev.payload.settings.iconMode ?? false;
             const title =
                 typeof percentage === "number" && percentage > 0
                     ? `${percentage}%`
                     : "--%";
-            if (ev.payload.settings.renderTitle) {
+            // Enforce exclusive modes: icon OR text
+            if (!showIcon) {
                 await ev.action.setTitle(title);
-            }
-            if (ev.payload.settings.renderIcon) {
+                await ev.action.setImage(undefined);
+            } else {
+                await ev.action.setTitle("");
                 let icon = icons.low;
                 if (!percentage || typeof percentage !== "number") {
                     await ev.action.setImage(
@@ -100,14 +108,21 @@ export class AttackSharkBatteryAction extends SingletonAction<Settings> {
                 );
             }
         } catch {
-            await ev.action.setImage(
-                `data:image/svg+xml,${encodeURIComponent(
-                    iconUnknown.replace(
-                        "{{COLOR}}",
-                        ev.payload.settings.iconColor
-                    )
-                )}`
-            );
+            const showIcon = ev.payload.settings.iconMode ?? false;
+            if (showIcon) {
+                await ev.action.setImage(
+                    `data:image/svg+xml,${encodeURIComponent(
+                        iconUnknown.replace(
+                            "{{COLOR}}",
+                            ev.payload.settings.iconColor
+                        )
+                    )}`
+                );
+                await ev.action.setTitle("");
+            } else {
+                await ev.action.setTitle("--%");
+                await ev.action.setImage(undefined);
+            }
         }
     }
 }
@@ -115,12 +130,31 @@ export class AttackSharkBatteryAction extends SingletonAction<Settings> {
 // ===== Attack Shark battery reader (adapted from battery-logger-node.js) =====
 
 const CONFIG = {
-    vendorId: 0x373e,
-    productIds: [0x0021, 0x0022, 0x003a, 0x003b, 0x0046, 0x0047],
     featureReportIdsToTry: [0, 4],
     featureReportLengthsToTry: [64, 65, 128],
     initialDelaysMsToTry: [120, 250, 400],
 };
+
+type MouseModelConfig = (typeof attackSharkModels)[number];
+
+function loadAttackSharkVidPidPairs(): Array<{ vid: number; pid: number }> {
+    const entries: MouseModelConfig[] = attackSharkModels as MouseModelConfig[];
+    const pairs = new Set<string>();
+    const addPair = (vidHex?: string, pidHex?: string) => {
+        if (!vidHex || !pidHex) return;
+        const key = `${vidHex}-${pidHex}`.toLowerCase();
+        pairs.add(key);
+    };
+    for (const e of entries) {
+        addPair(e.VIDWired, e.PIDWired);
+        addPair(e.VIDWireless, e.PIDWireless);
+        addPair(e.VIDWireless4K8K, e.PIDWireless4K8K);
+    }
+    return Array.from(pairs).map((key) => {
+        const [vidHex, pidHex] = key.split("-");
+        return { vid: parseInt(vidHex, 16), pid: parseInt(pidHex, 16) };
+    });
+}
 
 function ensureHidLoaded(): void {
     if (!HID) {
@@ -133,10 +167,10 @@ function ensureHidLoaded(): void {
 function enumerateCandidateDevices(): any[] {
     ensureHidLoaded();
     const all = HID.devices();
-    return all.filter(
-        (d: any) =>
-            d.vendorId === CONFIG.vendorId &&
-            CONFIG.productIds.includes(d.productId)
+    const supported = loadAttackSharkVidPidPairs();
+    const supportedSet = new Set(supported.map((p) => `${p.vid}:${p.pid}`));
+    return all.filter((d: any) =>
+        supportedSet.has(`${d.vendorId}:${d.productId}`)
     );
 }
 

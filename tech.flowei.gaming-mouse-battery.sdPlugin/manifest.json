@@ -18,6 +18,22 @@
 					"TitleAlignment": "middle"
 				}
 			]
+		},
+		{
+			"Name": "WL Mouse",
+			"UUID": "tech.flowei.gaming-mouse-battery.wl-mouse",
+			"Icon": "imgs/actions/icon",
+			"Tooltip": "Displays the current battery percentage of your WL Mouse.",
+			"PropertyInspectorPath": "ui/mouse-battery.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/loading",
+					"TitleAlignment": "middle"
+				}
+			]
 		}
 	],
 	"Category": "Gaming Mouse Battery",
