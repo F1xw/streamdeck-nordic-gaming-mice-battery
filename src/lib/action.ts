@@ -7,7 +7,6 @@ import streamDeck, {
     WillDisappearEvent,
 } from "@elgato/streamdeck";
 import { blank, icons, iconUnknown } from "../assets/battery-svg";
-import wlMouseModels from "../config/wl-mouse-mice.json";
 import {
     MouseModelConfig,
     buildDetectedItemsFromModels,
@@ -22,13 +21,13 @@ type Settings = {
     modelKey?: string; // one or more "VID-PID" tokens joined by '|'
 };
 
-@action({ UUID: "tech.flowei.gaming-mouse-battery.wl-mouse" })
-export class WlMouseBatteryAction extends SingletonAction<Settings> {
+export abstract class MouseBatteryAction extends SingletonAction<Settings> {
     private refreshTimer: NodeJS.Timeout | null = null;
     private lastBatteryState: {
         percentage: number;
         isCharging: boolean;
     } | null = null;
+    protected models: MouseModelConfig[] = [];
 
     override async onWillAppear(ev: WillAppearEvent<Settings>): Promise<void> {
         await this.renderUnknown(ev);
@@ -66,21 +65,6 @@ export class WlMouseBatteryAction extends SingletonAction<Settings> {
                 this.lastBatteryState.isCharging
             );
             return;
-        }
-    }
-
-    override async onSendToPlugin(
-        ev: import("@elgato/streamdeck").SendToPluginEvent<any, Settings>
-    ): Promise<void> {
-        const { event } = ev.payload || {};
-        if (event === "getDetectedModels") {
-            const items = buildDetectedItemsFromModels(
-                wlMouseModels as MouseModelConfig[]
-            );
-            streamDeck.ui.current?.sendToPropertyInspector({
-                event: "getDetectedModels",
-                items,
-            });
         }
     }
 
@@ -132,7 +116,7 @@ export class WlMouseBatteryAction extends SingletonAction<Settings> {
         try {
             const { isCharging, percentage } =
                 readBatteryStateFromModels(
-                    wlMouseModels as MouseModelConfig[],
+                    this.models as MouseModelConfig[],
                     ev.payload.settings.modelKey
                 ) ?? {};
             if (!percentage || !isCharging || typeof percentage !== "number") {
