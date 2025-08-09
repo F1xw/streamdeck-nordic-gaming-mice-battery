@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head lang="en">
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+  <style>
+    body { margin: 0.5rem; }
+  </style>
+  </head>
+<body>
+  <sdpi-item label="Model">
+    <sdpi-select setting="modelKey" datasource="getModels" loading="Loading models..." hot-reload></sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="Icon Mode">
+    <sdpi-checkbox setting="iconMode"></sdpi-checkbox>
+  </sdpi-item>
+  <sdpi-item label="Icon Color">
+    <sdpi-color setting="iconColor"></sdpi-color>
+  </sdpi-item>
+  
+</body>
+</html>
+

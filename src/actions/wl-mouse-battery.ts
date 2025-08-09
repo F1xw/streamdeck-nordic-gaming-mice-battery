@@ -1,4 +1,4 @@
-import {
+import streamDeck, {
     action,
     DidReceiveSettingsEvent,
     KeyDownEvent,
@@ -18,6 +18,7 @@ let HID: any;
 type Settings = {
     iconMode?: boolean; // true = icon, false = text
     iconColor: string;
+    modelKey?: string; // one or more "VID-PID" tokens joined by '|'
 };
 
 @action({ UUID: "tech.flowei.gaming-mouse-battery.wl-mouse" })
@@ -53,9 +54,23 @@ export class WlMouseBatteryAction extends SingletonAction<Settings> {
         await this.updateState(ev as unknown as WillAppearEvent<Settings>);
     }
 
+    override async onSendToPlugin(
+        ev: import("@elgato/streamdeck").SendToPluginEvent<any, Settings>
+    ): Promise<void> {
+        const { event } = ev.payload || {};
+        if (event === "getModels") {
+            const items = buildModelItemsFromConfig();
+            streamDeck.ui.current?.sendToPropertyInspector({
+                event: "getModels",
+                items,
+            });
+        }
+    }
+
     private async updateState(ev: WillAppearEvent<Settings>): Promise<void> {
         try {
-            const { isCharging, percentage } = readBatteryState() ?? {};
+            const { isCharging, percentage } =
+                readBatteryState(ev.payload.settings.modelKey) ?? {};
             const showIcon = ev.payload.settings.iconMode ?? false;
             const title =
                 typeof percentage === "number" && percentage > 0
@@ -66,7 +81,7 @@ export class WlMouseBatteryAction extends SingletonAction<Settings> {
                 await ev.action.setImage(
                     `data:image/svg+xml,${encodeURIComponent(
                         iconUnknown.replace(
-                            "#000000",
+                            "{{COLOR}}",
                             ev.payload.settings.iconColor
                         )
                     )}`
@@ -130,7 +145,7 @@ export class WlMouseBatteryAction extends SingletonAction<Settings> {
                 await ev.action.setImage(
                     `data:image/svg+xml,${encodeURIComponent(
                         iconUnknown.replace(
-                            "#000000",
+                            "{{COLOR}}",
                             ev.payload.settings.iconColor
                         )
                     )}`
@@ -150,7 +165,21 @@ const CONFIG = {
 
 type MouseModelConfig = (typeof wlMouseModels)[number];
 
-function loadWlMouseVidPidPairs(): Array<{ vid: number; pid: number }> {
+function derivePairsFromModelKey(
+    modelKey?: string
+): Array<{ vid: number; pid: number }> {
+    if (!modelKey) return [];
+    return modelKey.split("|").map((token) => {
+        const [vidHex, pidHex] = token.split("-");
+        return { vid: parseInt(vidHex, 16), pid: parseInt(pidHex, 16) };
+    });
+}
+
+function loadWlMouseVidPidPairs(
+    modelKey?: string
+): Array<{ vid: number; pid: number }> {
+    const explicit = derivePairsFromModelKey(modelKey);
+    if (explicit.length) return explicit;
     const entries: MouseModelConfig[] = wlMouseModels as MouseModelConfig[];
     const pairs = new Set<string>();
     const addPair = (vidHex?: string, pidHex?: string) => {
@@ -169,6 +198,22 @@ function loadWlMouseVidPidPairs(): Array<{ vid: number; pid: number }> {
     });
 }
 
+function buildModelItemsFromConfig() {
+    const entries: MouseModelConfig[] = wlMouseModels as MouseModelConfig[];
+    return entries.map((m) => {
+        const keys: string[] = [];
+        if (m.VIDWired && m.PIDWired) keys.push(`${m.VIDWired}-${m.PIDWired}`);
+        if (m.VIDWireless && m.PIDWireless)
+            keys.push(`${m.VIDWireless}-${m.PIDWireless}`);
+        if (m.VIDWireless4K8K && m.PIDWireless4K8K)
+            keys.push(`${m.VIDWireless4K8K}-${m.PIDWireless4K8K}`);
+        return {
+            label: m.ModelEN || (m as any).ModelCN || "Unknown",
+            value: keys.join("|"),
+        };
+    });
+}
+
 function ensureHidLoaded(): void {
     if (!HID) {
         // Load lazily so the module is only required when needed
@@ -177,10 +222,10 @@ function ensureHidLoaded(): void {
     }
 }
 
-function enumerateCandidateDevices(): any[] {
+function enumerateCandidateDevices(modelKey?: string): any[] {
     ensureHidLoaded();
     const all = HID.devices();
-    const supported = loadWlMouseVidPidPairs();
+    const supported = loadWlMouseVidPidPairs(modelKey);
     const supportedSet = new Set(supported.map((p) => `${p.vid}:${p.pid}`));
     return all.filter((d: any) =>
         supportedSet.has(`${d.vendorId}:${d.productId}`)
@@ -301,11 +346,11 @@ function tryReadBatteryOnce(
     }
 }
 
-function readBatteryState(): {
+function readBatteryState(modelKey?: string): {
     isCharging: boolean;
     percentage: number;
 } | null {
-    const candidates = enumerateCandidateDevices();
+    const candidates = enumerateCandidateDevices(modelKey);
     if (!candidates.length) return null;
 
     for (const info of candidates) {

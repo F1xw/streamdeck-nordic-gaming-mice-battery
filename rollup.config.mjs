@@ -74,6 +74,15 @@ const config = {
                 copyDirRecursive(srcDir, destDir);
             },
         },
+        {
+            name: "copy-config",
+            generateBundle() {
+                const srcDir = path.resolve("src", "config");
+                const destDir = path.resolve(sdPlugin, "config");
+                if (!fs.existsSync(srcDir)) return;
+                copyDirRecursive(srcDir, destDir);
+            }
+        },
     ],
 };
 
