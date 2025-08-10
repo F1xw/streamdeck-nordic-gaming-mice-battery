@@ -6,13 +6,14 @@ import streamDeck, {
     WillAppearEvent,
     WillDisappearEvent,
 } from "@elgato/streamdeck";
-import { blank, icons, iconUnknown } from "../assets/battery-svg";
+import { blank, icons, iconUnknown, settingsIcon } from "../assets/battery-svg";
 import {
     MouseModelConfig,
-    buildDetectedItemsFromModels,
-    readBatteryStateFromModels,
+    MouseHidManager,
     computeTitle,
     getIconSvg,
+    getDetectedPairs,
+    buildDetectedItemsFromModels,
 } from "../lib/mouse-shared";
 
 type Settings = {
@@ -27,13 +28,37 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
         percentage: number;
         isCharging: boolean;
     } | null = null;
+    private hid: MouseHidManager | null = null;
+    private currentSettings: Partial<Settings> | null = null;
 
     get models(): MouseModelConfig[] {
         throw new Error("Not implemented");
     }
 
     override async onWillAppear(ev: WillAppearEvent<Settings>): Promise<void> {
+        this.currentSettings = ev.payload.settings;
         await this.renderUnknown(ev);
+        if (!ev.payload.settings.modelKey) {
+            this.renderSettings(ev);
+            return;
+        }
+        try {
+            this.hid = new MouseHidManager(
+                this.models,
+                ev.payload.settings.modelKey
+            );
+        } catch {
+            await this.renderSettings(ev);
+            await ev.action.showAlert();
+            return;
+        }
+        this.hid.setOnConnectionChange((isConnected) => {
+            if (isConnected) {
+                this.updateState(ev);
+            } else {
+                this.renderUnknown(ev);
+            }
+        });
         await this.updateState(ev);
         this.refreshTimer = setInterval(() => {
             void this.updateState(ev);
@@ -45,15 +70,60 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
             clearInterval(this.refreshTimer);
             this.refreshTimer = null;
         }
+        if (this.hid) {
+            this.hid.closeAll();
+            this.hid = null;
+        }
     }
 
     override async onKeyDown(ev: KeyDownEvent<Settings>): Promise<void> {
         await this.updateState(ev as unknown as WillAppearEvent<Settings>);
+        if (ev.payload.settings.iconMode) {
+            const title = computeTitle(this.lastBatteryState?.percentage);
+            await ev.action.setImage(blank);
+            await ev.action.setTitle(
+                `data:image/svg+xml,${encodeURIComponent(
+                    svgText(title, this.currentSettings?.iconColor ?? "#FFFFFF")
+                )}`
+            );
+            setTimeout(() => {
+                void this.updateState(
+                    ev as unknown as WillAppearEvent<Settings>
+                );
+            }, 5000);
+        }
     }
 
     override async onDidReceiveSettings(
         ev: DidReceiveSettingsEvent<Settings>
     ): Promise<void> {
+        this.currentSettings = ev.payload.settings;
+        if (!ev.payload.settings.modelKey) {
+            this.renderSettings(ev);
+            return;
+        }
+        if (
+            ev.payload.settings.modelKey !== this.hid?.currentModelKey &&
+            ev.payload.settings.modelKey
+        ) {
+            this.hid?.closeAll();
+            this.hid = new MouseHidManager(
+                this.models,
+                ev.payload.settings.modelKey
+            );
+            this.hid.setOnConnectionChange((isConnected) => {
+                if (isConnected) {
+                    void this.updateState(
+                        ev as unknown as WillAppearEvent<Settings>
+                    );
+                } else {
+                    void this.renderUnknown(
+                        ev as unknown as WillAppearEvent<Settings>
+                    );
+                }
+            });
+        }
+
         if (this.lastBatteryState) {
             await this.renderKey(
                 ev as unknown as WillAppearEvent<Settings>,
@@ -69,16 +139,22 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
     ): Promise<void> {
         const { event } = ev.payload || {};
         if (event === "getDetectedModels") {
-            const items = buildDetectedItemsFromModels(this.models);
+            const data = buildDetectedItemsFromModels(this.models);
             streamDeck.ui.current?.sendToPropertyInspector({
                 event: "getDetectedModels",
-                items,
+                items: [
+                    {
+                        label: "Unknown",
+                        value: "",
+                    },
+                    ...data,
+                ],
             });
         }
     }
 
     private async renderKey(ev: any, percentage: number, isCharging: boolean) {
-        const showIcon = ev.payload.settings.iconMode ?? false;
+        const showIcon = this.currentSettings?.iconMode ?? false;
         const title = computeTitle(percentage);
         if (!showIcon) {
             await ev.action.setTitle(title);
@@ -88,7 +164,7 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
             const svg = getIconSvg(
                 icons,
                 iconUnknown,
-                ev.payload.settings.iconColor,
+                this.currentSettings?.iconColor ?? "#FFFFFF",
                 percentage,
                 isCharging
             );
@@ -99,13 +175,13 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
     }
 
     private async renderUnknown(ev: any) {
-        const showIcon = ev.payload.settings.iconMode ?? false;
+        const showIcon = this.currentSettings?.iconMode ?? false;
         if (showIcon) {
             await ev.action.setImage(
                 `data:image/svg+xml,${encodeURIComponent(
                     iconUnknown.replace(
                         "{{COLOR}}",
-                        ev.payload.settings.iconColor
+                        this.currentSettings?.iconColor ?? "#FFFFFF"
                     )
                 )}`
             );
@@ -116,13 +192,25 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
         }
     }
 
+    private async renderSettings(ev: any) {
+        await ev.action.setTitle("");
+        await ev.action.setImage(
+            `data:image/svg+xml,${encodeURIComponent(
+                settingsIcon.replace(
+                    "{{COLOR}}",
+                    this.currentSettings?.iconColor ?? "#FFFFFF"
+                )
+            )}`
+        );
+    }
+
     private async updateState(ev: WillAppearEvent<Settings>): Promise<void> {
         try {
-            const { isCharging, percentage } =
-                readBatteryStateFromModels(
-                    this.models,
-                    ev.payload.settings.modelKey
-                ) ?? {};
+            if (!this.hid) {
+                await ev.action.showAlert();
+                return;
+            }
+            const { isCharging, percentage } = this.hid.readBattery() ?? {};
             if (
                 typeof isCharging !== "boolean" ||
                 typeof percentage !== "number"
@@ -139,3 +227,6 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
         }
     }
 }
+
+const svgText = (text: string, color: string) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="${color}" viewBox="-6 -6 36 36"><text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" font-size="12" font-family="Arial, sans-serif">${text}</text></svg>`;
