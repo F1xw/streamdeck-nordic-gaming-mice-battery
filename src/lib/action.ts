@@ -27,7 +27,10 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
         percentage: number;
         isCharging: boolean;
     } | null = null;
-    protected models: MouseModelConfig[] = [];
+
+    get models(): MouseModelConfig[] {
+        throw new Error("Not implemented");
+    }
 
     override async onWillAppear(ev: WillAppearEvent<Settings>): Promise<void> {
         await this.renderUnknown(ev);
@@ -51,13 +54,6 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
     override async onDidReceiveSettings(
         ev: DidReceiveSettingsEvent<Settings>
     ): Promise<void> {
-        if (!ev.payload.settings.modelKey) {
-            await this.renderUnconfigured(
-                ev as unknown as WillAppearEvent<Settings>
-            );
-            return;
-        }
-
         if (this.lastBatteryState) {
             await this.renderKey(
                 ev as unknown as WillAppearEvent<Settings>,
@@ -65,6 +61,19 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
                 this.lastBatteryState.isCharging
             );
             return;
+        }
+    }
+
+    override async onSendToPlugin(
+        ev: import("@elgato/streamdeck").SendToPluginEvent<any, Settings>
+    ): Promise<void> {
+        const { event } = ev.payload || {};
+        if (event === "getDetectedModels") {
+            const items = buildDetectedItemsFromModels(this.models);
+            streamDeck.ui.current?.sendToPropertyInspector({
+                event: "getDetectedModels",
+                items,
+            });
         }
     }
 
@@ -107,19 +116,17 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
         }
     }
 
-    private async renderUnconfigured(ev: any) {
-        await ev.action.setTitle("Unconfigured");
-        await ev.action.setImage(blank);
-    }
-
     private async updateState(ev: WillAppearEvent<Settings>): Promise<void> {
         try {
             const { isCharging, percentage } =
                 readBatteryStateFromModels(
-                    this.models as MouseModelConfig[],
+                    this.models,
                     ev.payload.settings.modelKey
                 ) ?? {};
-            if (!percentage || !isCharging || typeof percentage !== "number") {
+            if (
+                typeof isCharging !== "boolean" ||
+                typeof percentage !== "number"
+            ) {
                 await this.renderUnknown(ev);
                 this.lastBatteryState = null;
             } else {
