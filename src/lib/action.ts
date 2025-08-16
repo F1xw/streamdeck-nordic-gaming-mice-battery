@@ -37,18 +37,17 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
 
     override async onWillAppear(ev: WillAppearEvent<Settings>): Promise<void> {
         this.currentSettings = ev.payload.settings;
-        await this.renderUnknown(ev);
-        if (!ev.payload.settings.modelKey) {
-            this.renderSettings(ev);
+        if (!(await this.checkConfig(ev))) {
             return;
         }
+        await this.renderUnknown(ev);
         try {
             this.hid = new MouseHidManager(
                 this.models,
-                ev.payload.settings.modelKey
+                ev.payload.settings.modelKey as string
             );
         } catch {
-            await this.renderSettings(ev);
+            await this.renderUnknown(ev);
             await ev.action.showAlert();
             return;
         }
@@ -77,11 +76,17 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
     }
 
     override async onKeyDown(ev: KeyDownEvent<Settings>): Promise<void> {
+        if (
+            !(await this.checkConfig(
+                ev as unknown as WillAppearEvent<Settings>
+            ))
+        ) {
+            return;
+        }
         await this.updateState(ev as unknown as WillAppearEvent<Settings>);
         if (ev.payload.settings.iconMode) {
             const title = computeTitle(this.lastBatteryState?.percentage);
-            await ev.action.setImage(blank);
-            await ev.action.setTitle(
+            await ev.action.setImage(
                 `data:image/svg+xml,${encodeURIComponent(
                     svgText(title, this.currentSettings?.iconColor ?? "#FFFFFF")
                 )}`
@@ -98,8 +103,11 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
         ev: DidReceiveSettingsEvent<Settings>
     ): Promise<void> {
         this.currentSettings = ev.payload.settings;
-        if (!ev.payload.settings.modelKey) {
-            this.renderSettings(ev);
+        if (
+            !(await this.checkConfig(
+                ev as unknown as WillAppearEvent<Settings>
+            ))
+        ) {
             return;
         }
         if (
@@ -107,10 +115,16 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
             ev.payload.settings.modelKey
         ) {
             this.hid?.closeAll();
-            this.hid = new MouseHidManager(
-                this.models,
-                ev.payload.settings.modelKey
-            );
+            try {
+                this.hid = new MouseHidManager(
+                    this.models,
+                    ev.payload.settings.modelKey
+                );
+            } catch (error) {
+                await this.renderUnknown(ev);
+                await ev.action.showAlert();
+                return;
+            }
             this.hid.setOnConnectionChange((isConnected) => {
                 if (isConnected) {
                     void this.updateState(
@@ -207,6 +221,7 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
     private async updateState(ev: WillAppearEvent<Settings>): Promise<void> {
         try {
             if (!this.hid) {
+                await this.renderUnknown(ev);
                 await ev.action.showAlert();
                 return;
             }
@@ -225,6 +240,15 @@ export abstract class MouseBatteryAction extends SingletonAction<Settings> {
             await this.renderUnknown(ev);
             this.lastBatteryState = null;
         }
+    }
+
+    private async checkConfig(ev: WillAppearEvent<Settings>): Promise<boolean> {
+        const { modelKey } = this.currentSettings ?? {};
+        if (!modelKey) {
+            await this.renderSettings(ev);
+            return false;
+        }
+        return true;
     }
 }
 
